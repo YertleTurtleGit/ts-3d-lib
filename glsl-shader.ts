@@ -144,12 +144,19 @@ const enum GLSL_CHANNEL {
 
 class Shader {
    private glslShader: GlslShader = null;
+   private width: number;
+   private height: number;
+
+   constructor(width: number, height: number) {
+      this.width = width;
+      this.height = height;
+   }
 
    public bind() {
       if (this.glslShader !== null) {
          console.warn("Shader is already bound!");
       }
-      this.glslShader = new GlslShader();
+      this.glslShader = new GlslShader(this.width, this.height);
    }
 
    public unbind() {
@@ -203,9 +210,9 @@ class GlslShader {
    // private glslBuffers: GlslBuffer[] = [];
    private glslCommands: string[] = [];
 
-   constructor() {
+   constructor(width: number, height: number) {
       GlslShader.currentShader = this;
-      this.glslContext = new GlslContext(WIDTH, HEIGHT);
+      this.glslContext = new GlslContext(width, height);
    }
 
    public getGlslImages(): GlslImage[] {
@@ -440,7 +447,7 @@ class GlslContext {
       this.glContext.shaderSource(vertexShader, vertexShaderSource);
       this.glContext.shaderSource(fragmentShader, fragmentShaderSource);
 
-      updateStatus("Compiling shader program.");
+      console.log("Compiling shader program.");
       this.glContext.compileShader(vertexShader);
       this.glContext.compileShader(fragmentShader);
 
@@ -454,7 +461,7 @@ class GlslContext {
 
    private loadGlslImages(shaderProgram: WebGLProgram): void {
       const glslImages: GlslImage[] = this.glslShader.getGlslImages();
-      updateStatus("Loading " + glslImages.length + " image(s) for gpu.");
+      console.log("Loading " + glslImages.length + " image(s) for gpu.");
 
       for (let i = 0; i < glslImages.length; i++) {
          glslImages[i].loadIntoShaderProgram(this.glContext, shaderProgram, i);
@@ -565,7 +572,7 @@ class GlslContext {
       this.glContext.useProgram(shaderProgram);
       this.loadGlslImages(shaderProgram);
 
-      updateStatus("Rendering on gpu.");
+      console.log("Rendering on gpu.");
 
       const vaoFrame = this.getFrameVAO(shaderProgram);
       this.drawArraysFromVAO(vaoFrame);

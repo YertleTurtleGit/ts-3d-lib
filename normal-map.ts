@@ -1,5 +1,39 @@
 "use strict";
 
+/*
+Spherical Coordinates
+
+The azimuthal angle is denoted by φ (phi).
+The polar angle is denoted by θ (theta).
+
+In the following, the notation [φ, θ] is used.
+
+https://www.geogebra.org/m/FzkZPN3K
+*/
+
+const EAST = 0;
+const NORTH_EAST = 45;
+const NORTH = 90;
+const NORTH_WEST = 135;
+const WEST = 180;
+const SOUTH_WEST = 225;
+const SOUTH = 270;
+const SOUTH_EAST = 315;
+
+/*
+The lighting degrees array describes all spherical degrees.
+*/
+const LIGHTING_AZIMUTHAL_ANGLES = [
+   EAST,
+   NORTH_EAST,
+   NORTH,
+   NORTH_WEST,
+   WEST,
+   SOUTH_WEST,
+   SOUTH,
+   SOUTH_EAST,
+];
+
 class NormalMap {
    private dataset: Dataset;
    private jsImageObject: HTMLImageElement;
@@ -12,7 +46,10 @@ class NormalMap {
       const normalMap: NormalMap = new NormalMap(null);
       normalMap.jsImageObject = jsImageObject;
 
-      const shader: Shader = new Shader();
+      const shader: Shader = new Shader(
+         jsImageObject.width,
+         jsImageObject.height
+      );
       shader.bind();
 
       const render: GlslRendering = GlslRendering.render(
@@ -78,7 +115,7 @@ class NormalMap {
       let images: GlslVector4[] = [];
       for (let i = 0; i < LIGHTING_AZIMUTHAL_ANGLES.length; i++) {
          images.push(
-            GlslImage.load(dataset.getImage(LIGHTING_AZIMUTHAL_ANGLES[i]))
+            GlslImage.load(this.dataset.getImage(LIGHTING_AZIMUTHAL_ANGLES[i]))
          );
       }
 
@@ -165,9 +202,9 @@ class NormalMap {
          [NORTH_EAST, NORTH_WEST, SOUTH_WEST],
       ];
 
-      uiBaseLayer++;
-      uiLog("Calculating anisotropic reflection matrices.");
-      uiBaseLayer--;
+
+      console.log("Calculating anisotropic reflection matrices.");
+
       let normalVectors: GlslVector3[] = [];
       for (let i = 0; i < COMBINATIONS.length; i++) {
          normalVectors.push(
