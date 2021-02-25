@@ -109,7 +109,13 @@ class NormalMap {
    }
 
    calculate(onloadCallback) {
-      let normalMapShader = new Shader();
+      const dimensionReferenceImage: HTMLImageElement = this.dataset.getImage(
+         LIGHTING_AZIMUTHAL_ANGLES[0]
+      );
+      const width: number = dimensionReferenceImage.width;
+      const height: number = dimensionReferenceImage.height;
+
+      let normalMapShader = new Shader(width, height);
       normalMapShader.bind();
 
       let images: GlslVector4[] = [];
@@ -201,7 +207,6 @@ class NormalMap {
          [NORTH_EAST, SOUTH_EAST, SOUTH_WEST],
          [NORTH_EAST, NORTH_WEST, SOUTH_WEST],
       ];
-
 
       console.log("Calculating anisotropic reflection matrices.");
 

@@ -233,10 +233,14 @@ class PointCloud {
       console.log("Integrating normal map.");
       console.log("Applying local gradient factor.");
 
-      let pointCloudShader = new Shader();
+      const normalMapImage: HTMLImageElement = this.normalMap.getAsJsImageObject();
+      const width: number = normalMapImage.width;
+      const height: number = normalMapImage.height;
+
+      let pointCloudShader = new Shader(width, height);
       pointCloudShader.bind();
 
-      const glslNormalMap = GlslImage.load(this.normalMap.getAsJsImageObject());
+      const glslNormalMap = GlslImage.load(normalMapImage);
 
       const red = glslNormalMap.channel(GLSL_CHANNEL.RED);
       const green = glslNormalMap.channel(GLSL_CHANNEL.GREEN);
