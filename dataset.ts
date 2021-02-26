@@ -17,13 +17,36 @@ class Dataset {
    private type: DATATYPE;
    private onlyNormalMap: boolean;
 
+   private testPolarAngle: number;
+   private webcamPolarAngle: number;
+   private loadingArea: HTMLElement;
+   private testObjectName: string;
+   private testFileExtension: string;
+   private inputDropArea: HTMLElement;
+   private testDatasetFolder: string;
+
    constructor(
       lightingAzimuthalAngles: number[],
-      dataLoadedCallback: TimerHandler
+      testPolarAngle: number,
+      webcamPolarAngle: number,
+      dataLoadedCallback: TimerHandler,
+      loadingArea: HTMLElement,
+      testObjectName: string,
+      testFileExtension: string,
+      inputDropArea: HTMLElement,
+      testDatasetFolder: string
    ) {
       this.lightingAzimuthalAngles = lightingAzimuthalAngles;
-      this.lightingCoordinates = null;
+      this.testPolarAngle = testPolarAngle;
+      this.webcamPolarAngle = webcamPolarAngle;
+      this.loadingArea = loadingArea;
       this.dataLoadedCallback = dataLoadedCallback;
+      this.testObjectName = testObjectName;
+      this.testFileExtension = testFileExtension;
+      this.inputDropArea = inputDropArea;
+      this.testDatasetFolder = testDatasetFolder;
+
+      this.lightingCoordinates = null;
       this.jsImageObjects = new Array(lightingAzimuthalAngles.length).fill(
          null
       );
@@ -98,7 +121,7 @@ class Dataset {
    }
 
    private showLoadingArea() {
-      LOADING_AREA.style.display = "block";
+      this.loadingArea.style.display = "block";
    }
 
    public listenForTestButtonClick(testButton: HTMLElement) {
@@ -108,10 +131,19 @@ class Dataset {
    private testButtonClicked() {
       this.type = DATATYPE.TEST;
       this.dataInput = new DataInput(this);
-      this.getLightingCoordinates(TEST_POLAR_ANGLE);
+      this.getLightingCoordinates(this.testPolarAngle);
 
       this.dataInput.setInputClass(
-         new TestInput(this.dataInput, this.dataLoaded.bind(this))
+         new TestInput(
+            this.dataInput,
+            this.testPolarAngle,
+            this.testObjectName,
+            this.testFileExtension,
+            this.inputDropArea,
+            this.loadingArea,
+            this.testDatasetFolder,
+            this.dataLoaded.bind(this)
+         )
       );
    }
 
@@ -128,7 +160,7 @@ class Dataset {
 
    private webcamButtonClicked(webcamResolution: number[]) {
       this.type = DATATYPE.WEBCAM;
-      this.getLightingCoordinates(WEBCAM_POLAR_ANGLE);
+      this.getLightingCoordinates(this.webcamPolarAngle);
       this.dataInput = new DataInput(this);
 
       this.dataInput.setInputClass(
@@ -210,7 +242,6 @@ class Dataset {
    }
 
    private dataLoaded() {
-      //console.log("Data loaded.");
       setTimeout(this.dataLoadedCallback, 0);
    }
 }
@@ -230,6 +261,10 @@ class DataInput {
       return this.inputClass.getObjectName();
    }
 
+   public getInputClass(): DropInput | WebcamInput | TestInput {
+      return this.inputClass;
+   }
+
    public setInputClass(inputClass: DropInput | WebcamInput | TestInput) {
       this.inputClass = inputClass;
    }
@@ -247,16 +282,37 @@ class TestInput {
    private loadedImages: number = 0;
    private dataInput: DataInput;
 
-   constructor(dataInput: DataInput, testDataLoadedCallback: TimerHandler) {
+   private testPolarAngle: number;
+   private testObjectName: string;
+   private testFileExtension: string;
+   private loadingArea: HTMLElement;
+   private testDatasetFolder: string;
+
+   constructor(
+      dataInput: DataInput,
+      testPolarAngle: number,
+      testObjectName: string,
+      testFileExtension: string,
+      inputDropArea: HTMLElement,
+      loadingArea: HTMLElement,
+      testDatasetFolder: string,
+      testDataLoadedCallback: TimerHandler
+   ) {
       this.dataInput = dataInput;
+      this.testPolarAngle = testPolarAngle;
       this.testDataLoadedCallback = testDataLoadedCallback;
-      INPUT_DROP_AREA.remove();
-      LOADING_AREA.style.display = "block";
+      this.testObjectName = testObjectName;
+      this.testFileExtension = testFileExtension;
+      this.loadingArea = loadingArea;
+      this.testDatasetFolder = testDatasetFolder;
+
+      inputDropArea.remove();
+      this.loadingArea.style.display = "block";
       this.loadAllImages();
    }
 
    public getObjectName() {
-      return TEST_OBJECT_NAME;
+      return this.testObjectName;
    }
 
    private singleImageLoaded(
@@ -271,7 +327,7 @@ class TestInput {
    }
 
    private loadAllImages() {
-      let polarString = "" + TEST_POLAR_ANGLE;
+      let polarString = "" + this.testPolarAngle;
       while (polarString.length < 3) {
          polarString = "0" + polarString;
       }
@@ -283,13 +339,13 @@ class TestInput {
          }
 
          const fileName =
-            TEST_OBJECT_NAME +
+            this.testObjectName +
             "_" +
             azimuthalString +
             "_" +
             polarString +
             "." +
-            TEST_FILE_EXTENSION;
+            this.testFileExtension;
 
          let image = new Image();
          image.addEventListener(
@@ -299,12 +355,12 @@ class TestInput {
                image,
                new SphericalCoordinate(
                   LIGHTING_AZIMUTHAL_ANGLES[i],
-                  TEST_POLAR_ANGLE
+                  this.testPolarAngle
                )
             )
          );
          image.crossOrigin = "anonymous";
-         image.src = TEST_DATASET_FOLDER + fileName;
+         image.src = this.testDatasetFolder + fileName;
       }
    }
 }
@@ -422,7 +478,7 @@ class DropInput {
       image: HTMLImageElement,
       imageDegree: SphericalCoordinate
    ) {
-      uiLog(
+      console.log(
          "Image with spherical degree " +
             imageDegree.getDisplayString() +
             " loaded.",
@@ -439,7 +495,7 @@ class DropInput {
 
 class WebcamInput {
    private dataInput: DataInput;
-   private gradientLighting: GradientLighting;
+   private screenLighting: ScreenLighting;
    private webcam: Webcam;
    private dataLoadedCallback: TimerHandler;
    private imageDataList: string[];
@@ -453,11 +509,11 @@ class WebcamInput {
       dataInput: DataInput,
       resolution: number[],
       lightingCoordinates: SphericalCoordinate[],
+
       dataLoadedCallback: TimerHandler
    ) {
-      IS_WEBCAM = true;
       this.dataInput = dataInput;
-      this.gradientLighting = new GradientLighting();
+      this.screenLighting = new GradientLighting();
       this.webcam = new Webcam(resolution, this.startCapture.bind(this));
       this.dataLoadedCallback = dataLoadedCallback;
 
@@ -467,6 +523,10 @@ class WebcamInput {
       this.loadedImages = 0;
       document.documentElement.requestFullscreen();
       this.webcam.startStreaming();
+   }
+
+   public getPolarAngle(): number {
+      return this.lightingCoordinates[0].getPolarAngle();
    }
 
    public getObjectName() {
@@ -505,7 +565,7 @@ class WebcamInput {
 
    public startCapture() {
       this.webcam.purgeDisplay();
-      this.gradientLighting.display(
+      this.screenLighting.display(
          this.lightingCoordinates[0].getAzimuthalAngle(),
          this.singleCapture.bind(this, this.lightingCoordinates[0])
       );
@@ -559,20 +619,28 @@ class WebcamInput {
          let lightingAngle = this.lightingCoordinates[
             nextLightingAngleIndex
          ].getAzimuthalAngle();
-         this.gradientLighting.display(
+
+         const webcamInput: WebcamInput = <WebcamInput>(
+            this.dataInput.getInputClass()
+         );
+
+         this.screenLighting.display(
             lightingAngle,
             this.singleCapture.bind(
                this,
-               new SphericalCoordinate(lightingAngle, WEBCAM_POLAR_ANGLE)
+               new SphericalCoordinate(
+                  lightingAngle,
+                  webcamInput.getPolarAngle()
+               )
             )
          );
       } else if (this.noLightImageData === null) {
-         this.gradientLighting.display(
+         this.screenLighting.display(
             null,
             this.singleCapture.bind(this, new SphericalCoordinate(null, null))
          );
       } else {
-         this.gradientLighting.hide();
+         this.screenLighting.hide();
          this.webcam.purge();
          this.loadAllImagesFromData();
       }

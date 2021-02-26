@@ -1,5 +1,11 @@
 "use strict";
 
+const enum VERTEX_COLOR {
+   ALBEDO = "albedo",
+   NORMAL_MAPPING = "normal_mapping",
+   ERROR_PRONENESS = "error-proneness",
+}
+
 class PointCloudRenderer {
    private pointCloud: PointCloud;
    private vertexCount: number;
@@ -17,9 +23,16 @@ class PointCloudRenderer {
    private rotationUniform: WebGLUniformLocation;
    private vertexColorBuffer: WebGLBuffer;
 
-   constructor(pointCloud: PointCloud, div: HTMLElement) {
+   private verticalOrientation: boolean;
+
+   constructor(
+      pointCloud: PointCloud,
+      div: HTMLElement,
+      verticalOrientation: boolean
+   ) {
       this.pointCloud = pointCloud;
       this.div = div;
+      this.verticalOrientation = verticalOrientation;
       this.vertexCount = this.pointCloud.getGpuVertices().length / 3;
    }
 
@@ -29,17 +42,14 @@ class PointCloudRenderer {
       switch (newColor) {
          case VERTEX_COLOR.ALBEDO: {
             colors = this.pointCloud.getGpuVertexAlbedoColors();
-            uiLog("Updating vertex color to albedo.");
             break;
          }
          case VERTEX_COLOR.NORMAL_MAPPING: {
             colors = this.pointCloud.getGpuVertexNormalColors();
-            uiLog("Updating vertex color to normal mapping.");
             break;
          }
          case VERTEX_COLOR.ERROR_PRONENESS: {
             colors = this.pointCloud.getGpuVertexErrorColors();
-            uiLog("Updating vertex color to error proneness.");
             break;
          }
       }
@@ -84,7 +94,7 @@ class PointCloudRenderer {
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, null);
 
       let xRot = -90;
-      if (IS_WEBCAM) {
+      if (this.verticalOrientation) {
          xRot = -45;
       }
       xRot *= DEGREE_TO_RADIAN_FACTOR;
@@ -186,7 +196,7 @@ class PointCloudRenderer {
    }
 
    public startRendering(): void {
-      uiLog("Loading rendered point cloud preview.");
+      console.log("Loading rendered point cloud preview.");
       this.initializeContext();
       this.render(0);
    }
