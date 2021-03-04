@@ -597,25 +597,31 @@ class GlslRendering {
    }
 
    public getPixelArray(): Uint8Array {
-      if (this.pixelArray === undefined) {
+      if (!this.pixelArray) {
          this.pixelArray = this.glslContext.renderPixelArray(this.outVariable);
       }
       return this.pixelArray;
    }
 
    public getDataUrl(): string {
-      if (this.dataUrl === undefined) {
+      if (!this.dataUrl) {
          this.getPixelArray();
          this.dataUrl = this.glslContext.renderDataUrl();
       }
       return this.dataUrl;
    }
 
-   public getJsImage(onloadCallback): HTMLImageElement {
-      if (this.jsImage === undefined) {
-         this.jsImage = new Image();
-         this.jsImage.addEventListener("load", onloadCallback);
-         this.jsImage.src = this.getDataUrl();
+   public async getJsImage(): Promise<HTMLImageElement> {
+      if (!this.jsImage) {
+         const thisDataUrl: string = this.getDataUrl();
+
+         this.jsImage = await new Promise((resolve) => {
+            const image = new Image();
+            image.addEventListener("load", () => {
+               resolve(image);
+            });
+            image.src = thisDataUrl;
+         });
       }
       return this.jsImage;
    }

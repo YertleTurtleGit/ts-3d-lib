@@ -17,9 +17,9 @@ class PointCloud {
 
    private gpuVertices: number[];
    private vertexAlbedoColors: Uint8Array;
-   private gpuVertexAlbedoColors: number[] = [];
-   private gpuVertexNormalColors: number[] = [];
-   private gpuVertexErrorColors: number[];
+   private gpuVertexAlbedoColors: number[];
+   private gpuVertexNormalColors: number[];
+   private gpuVertexErrorColors: number[] = [];
 
    constructor(
       normalMap: NormalMap,
@@ -51,26 +51,37 @@ class PointCloud {
       return this.azimuthalAngles;
    }
 
-   public downloadObj(filename: string, vertexColorArray: Uint8Array) {
-      filename += ".obj";
+   public downloadObj(
+      filename: string,
+      vertexColorArray: Uint8Array,
+      button: HTMLElement
+   ) {
+      button.style.display = "none";
+      const cThis: PointCloud = this;
+      setTimeout(() => {
+         filename += ".obj";
 
-      let element = document.createElement("a");
-      element.style.display = "none";
+         let element = document.createElement("a");
+         element.style.display = "none";
 
-      let blob = new Blob([this.getObjString()], {
-         type: "text/plain; charset = utf-8",
+         let blob = new Blob([cThis.getObjString()], {
+            type: "text/plain; charset = utf-8",
+         });
+
+         let url = window.URL.createObjectURL(blob);
+         element.setAttribute("href", window.URL.createObjectURL(blob));
+         element.setAttribute("download", filename);
+
+         document.body.appendChild(element);
+
+         element.click();
+
+         window.URL.revokeObjectURL(url);
+         element.remove();
+         setTimeout(() => {
+            button.style.display = "inherit";
+         }, 500);
       });
-
-      let url = window.URL.createObjectURL(blob);
-      element.setAttribute("href", window.URL.createObjectURL(blob));
-      element.setAttribute("download", filename);
-
-      document.body.appendChild(element);
-
-      element.click();
-
-      window.URL.revokeObjectURL(url);
-      element.remove();
    }
 
    private edgeFramePixels: { x: number; y: number }[];
@@ -221,18 +232,7 @@ class PointCloud {
       return stepVector.x * rightSlope + stepVector.y * topSlope;
    }
 
-   private anglesZValues: number[][];
-   public getAnglesZValues(): number[][] {
-      if (this.anglesZValues === undefined) {
-         this.calculate();
-      }
-      return this.anglesZValues;
-   }
-
-   public async calculate() {
-      console.log("Integrating normal map.");
-      console.log("Applying local gradient factor.");
-
+   private getLocalGradientFactor(): Uint8Array {
       const normalMapImage: HTMLImageElement = this.normalMap.getAsJsImageObject();
       const width: number = normalMapImage.width;
       const height: number = normalMapImage.height;
@@ -258,47 +258,183 @@ class PointCloud {
 
       pointCloudShader.purge();
 
-      console.log("Calculating anisotropic integrals.");
+      return gradientPixelArray;
+   }
 
-      this.anglesZValues = Array<Array<number>>(this.azimuthalAngles.length);
+   private calculateAnisotropicIntegral(
+      azimuthalAngle: number,
+      gradientPixelArray: Uint8Array,
+      statusCallback: (
+         description: string,
+         level: number,
+         percent?: number
+      ) => void
+   ): number[] {
+      const integral: number[] = new Array(this.width * this.height);
 
-      for (let i = 0; i < this.anglesZValues.length; i++) {
-         let pixelLines: {
-            x: number;
-            y: number;
-            slope: number;
-         }[][] = this.getPixelLinesFromAzimuthalAngle(
-            this.azimuthalAngles[i],
-            gradientPixelArray
-         );
+      let pixelLines: {
+         x: number;
+         y: number;
+         slope: number;
+      }[][] = this.getPixelLinesFromAzimuthalAngle(
+         azimuthalAngle,
+         gradientPixelArray
+      );
 
-         console.log(
-            "Calculating " +
-               pixelLines.length +
-               " integrals from azimuthal angle " +
-               this.azimuthalAngles[i] +
-               "."
-         );
+      statusCallback(
+         "Calculating " +
+            pixelLines.length +
+            " integrals from azimuthal angle " +
+            azimuthalAngle +
+            ".",
+         3
+      );
 
-         this.anglesZValues[i] = [];
-         this.anglesZValues[i].fill(null, 0, this.width * this.height);
+      for (let j = 0; j < pixelLines.length; j++) {
+         let lineOffset: number = 0;
 
-         for (let j = 0; j < pixelLines.length; j++) {
-            let lineOffset: number = 0;
+         for (let k = 0; k < pixelLines[j].length; k++) {
+            const index: number =
+               pixelLines[j][k].x + pixelLines[j][k].y * this.width;
 
-            for (let k = 0; k < pixelLines[j].length; k++) {
-               const index: number =
-                  pixelLines[j][k].x + pixelLines[j][k].y * this.width;
-
-               this.anglesZValues[i][index] = lineOffset;
-               lineOffset += pixelLines[j][k].slope * -this.depthFactor;
-            }
+            integral[index] = lineOffset;
+            lineOffset += pixelLines[j][k].slope * -this.depthFactor;
          }
       }
 
+      return integral;
+   }
+
+   private summarizeHorizontalImageLine(
+      y: number,
+      statusCallback: (
+         description: string,
+         level: number,
+         percent?: number
+      ) => void,
+      samplingRateStepX: number,
+      resolution: number,
+      normalMapPixelArray: Uint8Array
+   ): { averageError: number; highestError: number; zErrors: number[] } {
+      const result: {
+         averageError: number;
+         highestError: number;
+         zErrors: number[];
+      } = { averageError: 0, highestError: 0, zErrors: new Array(this.width) };
+
+      for (let x: number = 0; x < this.width; x += samplingRateStepX) {
+         const index: number = x + y * this.width;
+         const vectorIndex: number = index * 3;
+         const colorIndex: number = index * 4;
+
+         let zAverage: number = 0;
+         let zError: number = 0;
+         let averageDivisor: number = this.integrals.length;
+
+         for (let i = 0; i < this.integrals.length; i++) {
+            const currentZ: number = this.integrals[i][index];
+            if (!isNaN(currentZ)) {
+               zAverage += currentZ;
+               if (i !== 0) {
+                  zError += Math.abs(this.integrals[0][index] - currentZ);
+               }
+            }
+         }
+         zAverage /= averageDivisor;
+         zError /= averageDivisor;
+         result.averageError += zError / resolution;
+         result.highestError = Math.max(result.highestError, zError);
+         result.zErrors[x] = zError;
+
+         this.gpuVertices[vectorIndex + GLSL_CHANNEL.X] = x / this.width - 0.5;
+         this.gpuVertices[vectorIndex + GLSL_CHANNEL.Y] = y / this.width - 0.5;
+         this.gpuVertices[vectorIndex + GLSL_CHANNEL.Z] =
+            zAverage / this.width - 0.5;
+
+         const red: number =
+            this.vertexAlbedoColors[colorIndex + GLSL_CHANNEL.RED] / 255;
+         const green: number =
+            this.vertexAlbedoColors[colorIndex + GLSL_CHANNEL.GREEN] / 255;
+         const blue: number =
+            this.vertexAlbedoColors[colorIndex + GLSL_CHANNEL.BLUE] / 255;
+
+         this.gpuVertexAlbedoColors[vectorIndex + GLSL_CHANNEL.RED] = red;
+         this.gpuVertexAlbedoColors[vectorIndex + GLSL_CHANNEL.GREEN] = green;
+         this.gpuVertexAlbedoColors[vectorIndex + GLSL_CHANNEL.BLUE] = blue;
+
+         const normalRed: number =
+            normalMapPixelArray[colorIndex + GLSL_CHANNEL.RED] / 255;
+         const normalGreen: number =
+            normalMapPixelArray[colorIndex + GLSL_CHANNEL.GREEN] / 255;
+         const normalBlue: number =
+            normalMapPixelArray[colorIndex + GLSL_CHANNEL.BLUE] / 255;
+
+         this.gpuVertexNormalColors[vectorIndex + GLSL_CHANNEL.RED] = normalRed;
+         this.gpuVertexNormalColors[
+            vectorIndex + GLSL_CHANNEL.GREEN
+         ] = normalGreen;
+         this.gpuVertexNormalColors[
+            vectorIndex + GLSL_CHANNEL.BLUE
+         ] = normalBlue;
+
+         this.objString +=
+            "v " +
+            x +
+            " " +
+            y +
+            " " +
+            zAverage +
+            " " +
+            red +
+            " " +
+            green +
+            " " +
+            blue +
+            "\n";
+      }
+
+      return result;
+   }
+
+   private integrals: number[][];
+   public async calculate(
+      statusCallback: (
+         description: string,
+         level: number,
+         percent?: number
+      ) => void
+   ) {
+      statusCallback("Integrating normal map.", 0);
+
+      const gradientThreadPool: ThreadPool = new ThreadPool(
+         "Calculating slopes.",
+         1,
+         statusCallback
+      );
+      gradientThreadPool.add(this.getLocalGradientFactor.bind(this));
+
+      const gradientPixelArrayPromise = await gradientThreadPool.run();
+      const gradientPixelArray: Uint8Array = gradientPixelArrayPromise[0];
+
+      const integralThreadPool: ThreadPool = new ThreadPool(
+         "Calculating integrals.",
+         1,
+         statusCallback
+      );
+
+      for (let i = 0, length = this.azimuthalAngles.length; i < length; i++) {
+         const integralMethod: Function = this.calculateAnisotropicIntegral.bind(
+            this,
+            this.azimuthalAngles[i],
+            gradientPixelArray,
+            statusCallback
+         );
+         integralThreadPool.add(integralMethod);
+      }
+
+      this.integrals = await integralThreadPool.run();
+
       this.objString = "";
-      this.gpuVertices = [];
-      this.gpuVertexErrorColors = [];
 
       let resolution: number = this.width * this.height;
       let samplingRateStep: { x: number; y: number } = { x: 1, y: 1 };
@@ -314,86 +450,60 @@ class PointCloud {
       }
       */
 
-      console.log("Summarizing data.");
+      const dimensionSingleChannel: number = this.width * this.height;
+      const dimensionThreeChannel: number = dimensionSingleChannel * 3;
 
-      let highestError: number = 0;
-      let averageError: number = 0;
-      let zErrors: number[] = [];
+      const zErrors: number[] = new Array(dimensionSingleChannel);
+      this.gpuVertices = new Array(dimensionThreeChannel);
+      this.gpuVertexAlbedoColors = new Array(dimensionThreeChannel);
+      this.gpuVertexNormalColors = new Array(dimensionThreeChannel);
 
       const normalMapPixelArray: Uint8Array = this.normalMap.getAsPixelArray();
 
-      for (let x = 0; x < this.width; x += samplingRateStep.x) {
-         for (let y = 0; y < this.height; y += samplingRateStep.y) {
-            const index: number = x + y * this.width;
-            const colorIndex: number = index * 4;
-            let zAverage: number = 0;
-            let zError: number = 0;
-            let averageDivisor: number = this.anglesZValues.length;
+      const summerizeThreadPool: ThreadPool = new ThreadPool(
+         "Summarizing data.",
+         1,
+         statusCallback
+      );
 
-            for (let i = 0; i < this.anglesZValues.length; i++) {
-               const currentZ: number = this.anglesZValues[i][index];
-               if (!isNaN(currentZ)) {
-                  zAverage += currentZ;
-                  if (i !== 0) {
-                     zError += Math.abs(
-                        this.anglesZValues[0][index] - currentZ
-                     );
-                  }
-               }
-            }
-            zAverage /= averageDivisor;
-            zError /= averageDivisor;
-            averageError += zError / resolution;
-            highestError = Math.max(highestError, zError);
-            zErrors.push(zError);
+      for (let y = 0; y < this.height; y += samplingRateStep.y) {
+         const summerizeMethod: Function = this.summarizeHorizontalImageLine.bind(
+            this,
+            y,
+            statusCallback,
+            samplingRateStep.x,
+            resolution,
+            normalMapPixelArray
+         );
+         summerizeThreadPool.add(summerizeMethod);
+      }
 
-            this.gpuVertices.push(
-               x / this.width - 0.5,
-               y / this.width - 0.5,
-               zAverage / this.width - 0.5
+      const results: {
+         averageError: number;
+         highestError: number;
+         zErrors: number[];
+      }[] = await summerizeThreadPool.run();
+
+      let highestError: number = 0;
+      let averageError: number = 0;
+      for (let j = 0, length = results.length; j < length; j++) {
+         highestError = Math.max(...results[j].zErrors, highestError);
+         averageError += results[j].averageError;
+      }
+
+      for (let j = 0, length = results.length; j < length; j++) {
+         const zErrorsLine: number[] = results[j].zErrors;
+         for (let i = 0, length = zErrorsLine.length; i < length; i++) {
+            this.gpuVertexErrorColors.push(
+               zErrorsLine[i] / highestError,
+               1 - zErrorsLine[i] / highestError,
+               0
             );
-            const red: number =
-               this.vertexAlbedoColors[colorIndex + GLSL_CHANNEL.RED] / 255;
-            const green: number =
-               this.vertexAlbedoColors[colorIndex + GLSL_CHANNEL.GREEN] / 255;
-            const blue: number =
-               this.vertexAlbedoColors[colorIndex + GLSL_CHANNEL.BLUE] / 255;
-            this.gpuVertexAlbedoColors.push(red, green, blue);
-
-            const normalRed: number =
-               normalMapPixelArray[colorIndex + GLSL_CHANNEL.RED] / 255;
-            const normalGreen: number =
-               normalMapPixelArray[colorIndex + GLSL_CHANNEL.GREEN] / 255;
-            const normalBlue: number =
-               normalMapPixelArray[colorIndex + GLSL_CHANNEL.BLUE] / 255;
-            this.gpuVertexNormalColors.push(normalRed, normalGreen, normalBlue);
-
-            this.objString +=
-               "v " +
-               x +
-               " " +
-               y +
-               " " +
-               zAverage +
-               " " +
-               red +
-               " " +
-               green +
-               " " +
-               blue +
-               "\n";
+            zErrors.push(zErrorsLine[i]);
          }
       }
 
-      for (let i = 0; i < zErrors.length; i++) {
-         this.gpuVertexErrorColors.push(
-            zErrors[i] / highestError,
-            1 - zErrors[i] / highestError,
-            0
-         );
-      }
-
-      console.log("Average error of z values: " + averageError);
+      statusCallback("Average error of z values: " + averageError, 1);
 
       /*uiLog(
          "Reduced point cloud resolution by around " +
@@ -404,38 +514,27 @@ class PointCloud {
       );*/
    }
 
+   public getAnglesZValues(): number[][] {
+      return this.integrals;
+   }
+
    public getObjString(): string {
-      if (this.objString === undefined) {
-         this.calculate();
-      }
       return this.objString;
    }
 
    public getGpuVertices(): number[] {
-      if (this.gpuVertices === undefined) {
-         this.calculate();
-      }
       return this.gpuVertices;
    }
 
    public getGpuVertexAlbedoColors(): number[] {
-      if (this.gpuVertexAlbedoColors === undefined) {
-         this.calculate();
-      }
       return this.gpuVertexAlbedoColors;
    }
 
    public getGpuVertexNormalColors(): number[] {
-      if (this.gpuVertexNormalColors === undefined) {
-         this.calculate();
-      }
       return this.gpuVertexNormalColors;
    }
 
    public getGpuVertexErrorColors(): number[] {
-      if (this.gpuVertexErrorColors === undefined) {
-         this.calculate();
-      }
       return this.gpuVertexErrorColors;
    }
 }
