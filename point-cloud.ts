@@ -263,12 +263,7 @@ class PointCloud {
 
    private calculateAnisotropicIntegral(
       azimuthalAngle: number,
-      gradientPixelArray: Uint8Array,
-      statusCallback: (
-         description: string,
-         level: number,
-         percent?: number
-      ) => void
+      gradientPixelArray: Uint8Array
    ): number[] {
       const integral: number[] = new Array(this.width * this.height);
 
@@ -281,14 +276,14 @@ class PointCloud {
          gradientPixelArray
       );
 
-      statusCallback(
+      /*console.log(
          "Calculating " +
             pixelLines.length +
             " integrals from azimuthal angle " +
             azimuthalAngle +
             ".",
          3
-      );
+      );*/
 
       for (let j = 0; j < pixelLines.length; j++) {
          let lineOffset: number = 0;
@@ -307,11 +302,6 @@ class PointCloud {
 
    private summarizeHorizontalImageLine(
       y: number,
-      statusCallback: (
-         description: string,
-         level: number,
-         percent?: number
-      ) => void,
       samplingRateStepX: number,
       resolution: number,
       normalMapPixelArray: Uint8Array
@@ -397,37 +387,30 @@ class PointCloud {
    }
 
    private integrals: number[][];
-   public async calculate(
-      statusCallback: (
-         description: string,
-         level: number,
-         percent?: number
-      ) => void
-   ) {
-      statusCallback("Integrating normal map.", 0);
-
-      const gradientThreadPool: ThreadPool = new ThreadPool(
-         "Calculating slopes.",
-         1,
-         statusCallback
+   public async calculate() {
+      const gradientDOMStatus: DOMStatusElement = new DOMStatusElement(
+         "Calculating slopes."
       );
+      const integralDOMStatus: DOMStatusElement = new DOMStatusElement(
+         "Integrating normal mapping."
+      );
+      const summarizeDOMStatus: DOMStatusElement = new DOMStatusElement(
+         "Summarizing data."
+      );
+
+      const gradientThreadPool: ThreadPool = new ThreadPool(gradientDOMStatus);
       gradientThreadPool.add(this.getLocalGradientFactor.bind(this));
 
       const gradientPixelArrayPromise = await gradientThreadPool.run();
       const gradientPixelArray: Uint8Array = gradientPixelArrayPromise[0];
 
-      const integralThreadPool: ThreadPool = new ThreadPool(
-         "Calculating integrals.",
-         1,
-         statusCallback
-      );
+      const integralThreadPool: ThreadPool = new ThreadPool(integralDOMStatus);
 
       for (let i = 0, length = this.azimuthalAngles.length; i < length; i++) {
          const integralMethod: Function = this.calculateAnisotropicIntegral.bind(
             this,
             this.azimuthalAngles[i],
-            gradientPixelArray,
-            statusCallback
+            gradientPixelArray
          );
          integralThreadPool.add(integralMethod);
       }
@@ -461,16 +444,13 @@ class PointCloud {
       const normalMapPixelArray: Uint8Array = this.normalMap.getAsPixelArray();
 
       const summerizeThreadPool: ThreadPool = new ThreadPool(
-         "Summarizing data.",
-         1,
-         statusCallback
+         summarizeDOMStatus
       );
 
       for (let y = 0; y < this.height; y += samplingRateStep.y) {
          const summerizeMethod: Function = this.summarizeHorizontalImageLine.bind(
             this,
             y,
-            statusCallback,
             samplingRateStep.x,
             resolution,
             normalMapPixelArray
@@ -503,9 +483,9 @@ class PointCloud {
          }
       }
 
-      statusCallback("Average error of z values: " + averageError, 1);
+      console.log("Average error of z values: " + averageError, 1);
 
-      /*uiLog(
+      /*console.log(
          "Reduced point cloud resolution by around " +
             Math.round(100 - (resolution / (this.width * this.height)) * 100) +
             " percent. Currently " +
