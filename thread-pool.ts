@@ -1,7 +1,7 @@
 "use strict";
 
 const MAX_RUNNING_THREADS_IN_POOL: number = 32;
-const POOL_STATUS_REFRESH_INTERVAL_PERCENT: number = 4;
+const POOL_STATUS_REFRESH_INTERVAL_PERCENT: number = 5;
 
 class ThreadPool {
    private threads: Thread[] = [];
@@ -15,25 +15,15 @@ class ThreadPool {
 
    private finishedThreadsCount: number = 0;
 
-   private statusDescription: string;
-   private statusLevel: number;
-   private statusCallback: Function;
+   private domStatusElement: DOMStatusElement;
    private statusProgressPercent: number = 0;
 
    constructor(
-      statusDescription: string,
-      statusLevel: number,
-      statusCallback: (
-         description: string,
-         level: number,
-         percent?: number
-      ) => void,
+      domStatusElement: DOMStatusElement,
       maxRunningThreadCount: number = MAX_RUNNING_THREADS_IN_POOL,
       statusRefreshIntervalPercent: number = POOL_STATUS_REFRESH_INTERVAL_PERCENT
    ) {
-      this.statusDescription = statusDescription;
-      this.statusLevel = statusLevel;
-      this.statusCallback = statusCallback;
+      this.domStatusElement = domStatusElement;
       this.maxRunningThreadCount = maxRunningThreadCount;
       this.statusRefreshIntervalPercent = statusRefreshIntervalPercent;
    }
@@ -62,6 +52,7 @@ class ThreadPool {
          while (!threadPool.isFinished()) {
             await new Promise((r) => setTimeout(r, 500));
          }
+         this.domStatusElement.setFinish();
          resolve(threadPool.results);
       });
    }
@@ -83,12 +74,7 @@ class ThreadPool {
          const durationInSeconds: number = Math.round(
             performance.now() - this.startTime
          );
-         console.log(
-            this.statusDescription +
-               " Finished and took " +
-               durationInSeconds +
-               "ms."
-         );
+         // TODO: Display duration.
          this.updateStatus();
       } else {
          this.startNextThreads();
@@ -123,11 +109,7 @@ class ThreadPool {
       this.statusProgressPercent =
          (this.finishedThreadsCount / this.threads.length) * 100;
 
-      this.statusCallback(
-         this.statusDescription,
-         this.statusLevel,
-         this.statusProgressPercent
-      );
+      this.domStatusElement.updateProgress(this.statusProgressPercent);
    }
 }
 
