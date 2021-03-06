@@ -41,6 +41,7 @@ class DOMStatusElement {
       divToRemove.style.transition = "all 0.5s";
       divToRemove.style.transform += "translateY(-50%)";
       divToRemove.style.opacity = "0";
+
       setTimeout(() => {
          divToRemove.remove();
       }, 250);

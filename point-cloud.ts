@@ -211,7 +211,12 @@ class PointCloud {
          blue: this.normalMap.getAsPixelArray()[pixelIndex + GLSL_CHANNEL.BLUE],
       };
 
-      if (normal.blue >= 255 * 0.9) {
+      if (
+         normal.red + normal.blue + normal.green === 0 ||
+         normal.red === 255 ||
+         normal.green === 255 ||
+         normal.blue === 255
+      ) {
          return true;
       }
       return false;
@@ -223,6 +228,10 @@ class PointCloud {
       gradientPixelArray: Uint8Array
    ): number {
       const index = (pixel.x + pixel.y * this.width) * 4;
+
+      if (this.isPixelMaskedOut(index)) {
+         return undefined;
+      }
 
       const rightSlope: number =
          gradientPixelArray[index + GLSL_CHANNEL.RED] + SLOPE_SHIFT;
@@ -293,7 +302,11 @@ class PointCloud {
                pixelLines[j][k].x + pixelLines[j][k].y * this.width;
 
             integral[index] = lineOffset;
-            lineOffset += pixelLines[j][k].slope * -this.depthFactor;
+            if (pixelLines[j][k].slope) {
+               lineOffset += pixelLines[j][k].slope * -this.depthFactor;
+            } else {
+               lineOffset = 0;
+            }
          }
       }
 
