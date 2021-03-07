@@ -26,6 +26,7 @@ enum SYMBOL {
 enum METHOD {
    MAXIMUM = "max",
    MINIMUM = "min",
+   DOT = "dot",
    INVERSE = "inverse",
    NORMALIZE = "normalize",
    LENGTH = "length",
@@ -69,6 +70,10 @@ class GLSL_OPERATORS {
    };
    public static readonly MINIMUM: GLSL_OPERATOR = {
       NAME: METHOD.MINIMUM,
+      TYPE: METHOD,
+   };
+   public static readonly DOT: GLSL_OPERATOR = {
+      NAME: METHOD.DOT,
       TYPE: METHOD,
    };
    public static readonly INVERSE: GLSL_OPERATOR = {
@@ -144,19 +149,17 @@ const enum GLSL_CHANNEL {
 
 class Shader {
    private glslShader: GlslShader = null;
-   private width: number;
-   private height: number;
+   private dimensions: { width: number; height: number };
 
-   constructor(width: number, height: number) {
-      this.width = width;
-      this.height = height;
+   constructor(dimensions: { width: number; height: number }) {
+      this.dimensions = dimensions;
    }
 
    public bind() {
       if (this.glslShader !== null) {
          console.warn("Shader is already bound!");
       }
-      this.glslShader = new GlslShader(this.width, this.height);
+      this.glslShader = new GlslShader(this.dimensions);
    }
 
    public unbind() {
@@ -210,9 +213,9 @@ class GlslShader {
    // private glslBuffers: GlslBuffer[] = [];
    private glslCommands: string[] = [];
 
-   constructor(width: number, height: number) {
+   constructor(dimensions: { width: number; height: number }) {
       GlslShader.currentShader = this;
-      this.glslContext = new GlslContext(width, height);
+      this.glslContext = new GlslContext(dimensions);
    }
 
    public getGlslImages(): GlslImage[] {
@@ -401,11 +404,11 @@ class GlslContext {
    private glContext: WebGL2RenderingContext;
    private glCanvas: HTMLCanvasElement;
 
-   constructor(width: number, height: number) {
+   constructor(dimensions: { width: number; height: number }) {
       this.glslShader = GlslShader.getCurrentShader();
       this.glCanvas = document.createElement("canvas");
-      this.glCanvas.width = width;
-      this.glCanvas.height = height;
+      this.glCanvas.width = dimensions.width;
+      this.glCanvas.height = dimensions.height;
       this.glContext = this.glCanvas.getContext("webgl2");
    }
 
@@ -929,6 +932,7 @@ abstract class GlslVector extends GlslVariable {
    public abstract normalize(): GlslVector;
    public abstract maximum(...parameters: GlslVariable[]): GlslVariable;
    public abstract minimum(...parameters: GlslVariable[]): GlslVariable;
+   public abstract dot(parameter: GlslVector): GlslFloat;
 
    public channel(channel: GLSL_CHANNEL): GlslFloat {
       return this.getGlslFloatResult(
@@ -1156,6 +1160,9 @@ class GlslVector3 extends GlslVector {
    public minimum(...parameters: GlslVariable[]): GlslVector3 {
       return this.getGlslVector3Result(parameters, GLSL_OPERATORS.MINIMUM);
    }
+   public dot(parameter: GlslVector): GlslFloat {
+      return this.getGlslFloatResult([this, parameter], GLSL_OPERATORS.DOT);
+   }
 
    public getVector4(fourthChannel: GlslFloat = new GlslFloat(1)): GlslVector4 {
       return this.getGlslVector4Result(
@@ -1238,6 +1245,9 @@ class GlslVector4 extends GlslVector {
    }
    public minimum(...parameters: GlslVariable[]): GlslVector4 {
       return this.getGlslVector4Result(parameters, GLSL_OPERATORS.MINIMUM);
+   }
+   public dot(parameter: GlslVector): GlslFloat {
+      return this.getGlslFloatResult([this, parameter], GLSL_OPERATORS.DOT);
    }
 
    public getLuminanceFloat(): GlslFloat {
