@@ -9,6 +9,9 @@ class PointCloud {
    private depthFactor: number;
    private azimuthalAngles: number[];
 
+   private mask: boolean[];
+   private offsets: number[]; // TODO: Continue implementing.
+
    private width: number;
    private height: number;
    private objString: string;
@@ -85,6 +88,20 @@ class PointCloud {
             }, 500);
          }
       });
+   }
+
+   private calculateMask(): void {
+      this.mask = new Array(this.width * this.height).fill(true);
+      let offset: number = 0;
+      for (let y = 0; y < this.height; y++) {
+         for (let x = 0; x < this.width; x++) {
+            const index = x + y * this.width;
+            if (this.isPixelMaskedOut(index)) {
+               this.mask[index] = false;
+               offset++;
+            }
+         }
+      }
    }
 
    private edgeFramePixels: { x: number; y: number }[];
@@ -206,22 +223,20 @@ class PointCloud {
    }
 
    private isPixelMaskedOut(pixelIndex: number): boolean {
-      /*let normal: { red: number; green: number; blue: number } = {
-         red: this.normalMap.getAsPixelArray()[pixelIndex + GLSL_CHANNEL.RED],
-         green: this.normalMap.getAsPixelArray()[
-            pixelIndex + GLSL_CHANNEL.GREEN
-         ],
-         blue: this.normalMap.getAsPixelArray()[pixelIndex + GLSL_CHANNEL.BLUE],
+      let normal: { red: number; green: number; blue: number } = {
+         red: this.normalMapPixelArray[pixelIndex + GLSL_CHANNEL.RED],
+         green: this.normalMapPixelArray[pixelIndex + GLSL_CHANNEL.GREEN],
+         blue: this.normalMapPixelArray[pixelIndex + GLSL_CHANNEL.BLUE],
       };
 
       if (
-         normal.red + normal.blue + normal.green < 50 ||
-         normal.red >= 220 ||
-         normal.green >= 220 ||
-         normal.blue >= 220
+         normal.red + normal.blue + normal.green === 0 ||
+         normal.red === 255 ||
+         normal.green === 255 ||
+         normal.blue === 255
       ) {
          return true;
-      }*/
+      }
       return false;
    }
 
