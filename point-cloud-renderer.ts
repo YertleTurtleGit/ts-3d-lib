@@ -7,7 +7,7 @@ const enum VERTEX_COLOR {
 }
 
 class PointCloudRenderer {
-   private pointCloud: PointCloud;
+   private vertices: number[];
    private vertexCount: number;
    private vertexSize: number = 2;
 
@@ -26,33 +26,20 @@ class PointCloudRenderer {
    private verticalOrientation: boolean;
 
    constructor(
-      pointCloud: PointCloud,
+      vertices: number[],
       div: HTMLElement,
-      verticalOrientation: boolean
+      verticalOrientation: boolean = false
    ) {
-      this.pointCloud = pointCloud;
+      this.vertices = vertices;
       this.div = div;
       this.verticalOrientation = verticalOrientation;
-      this.vertexCount = this.pointCloud.getGpuVertices().length / 3;
+      this.vertexCount = vertices.length / 3;
    }
 
    public updateVertexColor(newColor: VERTEX_COLOR): void {
       let colors: number[];
 
-      switch (newColor) {
-         case VERTEX_COLOR.ALBEDO: {
-            colors = this.pointCloud.getGpuVertexAlbedoColors();
-            break;
-         }
-         case VERTEX_COLOR.NORMAL_MAPPING: {
-            colors = this.pointCloud.getGpuVertexNormalColors();
-            break;
-         }
-         case VERTEX_COLOR.ERROR_PRONENESS: {
-            colors = this.pointCloud.getGpuVertexErrorColors();
-            break;
-         }
-      }
+      // TODO: Set color.
 
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexColorBuffer);
       this.gl.bufferData(
@@ -69,8 +56,8 @@ class PointCloudRenderer {
       this.div.appendChild(this.canvas);
       this.gl = this.canvas.getContext("webgl2");
 
-      let vertices = this.pointCloud.getGpuVertices();
-      let colors = this.pointCloud.getGpuVertexAlbedoColors();
+      let vertices = this.vertices;
+      let colors = new Array(vertices.length).fill(1);
 
       let vertex_buffer = this.gl.createBuffer();
 
@@ -130,7 +117,7 @@ class PointCloudRenderer {
          " xRot[1] = vec3(0.0, cosRotX, -sinRotX);",
          " xRot[2] = vec3(0.0, sinRotX, cosRotX);",
          " vec3 pos = coordinates * xRot * yRot;",
-         " gl_Position = vec4(pos.x *2.0, (pos.y + 0.5) *2.0, pos.z *2.0, 1.0);",
+         " gl_Position = vec4(coordinates * yRot, 1.0);",
          " gl_PointSize = " +
             GlslFloat.getJsNumberAsString(this.vertexSize) +
             ";",

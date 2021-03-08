@@ -8,9 +8,11 @@ class PointCloud {
    private normalMap: NormalMap;
    private depthFactor: number;
    private azimuthalAngles: number[];
+   private rotation: { azimuthal: number; polar: number };
 
-   private mask: boolean[];
-   private offsets: number[]; // TODO: Continue implementing.
+   private mask: Uint8Array;
+   private pixelToVertexIndexMap: number[];
+   private vertexToPixelIndexMap: number[];
 
    private width: number;
    private height: number;
@@ -19,10 +21,6 @@ class PointCloud {
    private maxVertexCount: number;
 
    private gpuVertices: number[];
-   private vertexAlbedoColors: Uint8Array;
-   private gpuVertexAlbedoColors: number[];
-   private gpuVertexNormalColors: number[];
-   private gpuVertexErrorColors: number[] = [];
 
    constructor(
       normalMap: NormalMap,
@@ -31,9 +29,11 @@ class PointCloud {
       depthFactor: number,
       maxVertexCount: number,
       azimuthalAngles: number[],
-      vertexAlbedoColors: Uint8Array = new Uint8Array(
-         new Array(width * height * 4).fill(255)
-      )
+      rotation: { azimuthal: number; polar: number } = {
+         azimuthal: 0,
+         polar: 0,
+      },
+      mask: Uint8Array = new Uint8Array(new Array(width * height * 4).fill(255))
    ) {
       this.normalMap = normalMap;
       this.depthFactor = depthFactor;
@@ -41,7 +41,9 @@ class PointCloud {
       this.height = height;
       this.maxVertexCount = maxVertexCount;
       this.azimuthalAngles = azimuthalAngles;
-      this.vertexAlbedoColors = vertexAlbedoColors;
+      this.rotation = rotation;
+      this.mask = mask;
+      this.calculateIndexMaps();
    }
 
    public getWidth(): number {
@@ -90,15 +92,96 @@ class PointCloud {
       });
    }
 
-   private calculateMask(): void {
-      this.mask = new Array(this.width * this.height).fill(true);
-      let offset: number = 0;
+   private getRotatedVertex(vertex: number[]): number[] {
+      const dotVec3: Function = (
+         vector1: number[],
+         vector2: number[]
+      ): number => {
+         let result: number = 0;
+         for (let i = 0; i < 3; i++) {
+            result += vector1[i] * vector2[i];
+         }
+         return result;
+      };
+      const rotateAround: Function = (
+         vector: number[],
+         axis: number[],
+         angleDegree: number
+      ): number[] => {
+         const angle: number = angleDegree * DEGREE_TO_RADIAN_FACTOR;
+         const axisDivisor: number = Math.sqrt(dotVec3(axis, axis));
+         axis = [
+            axis[0] / axisDivisor,
+            axis[1] / axisDivisor,
+            axis[2] / axisDivisor,
+         ];
+
+         const a: number = Math.cos(angle / 2.0);
+         const b: number = -axis[0] * Math.sin(angle / 2.0);
+         const c: number = -axis[1] * Math.sin(angle / 2.0);
+         const d: number = -axis[2] * Math.sin(angle / 2.0);
+
+         const aa: number = a * a;
+         const bb: number = b * b;
+         const cc: number = c * c;
+         const dd: number = d * d;
+
+         const bc: number = b * c;
+         const ad: number = a * d;
+         const ac: number = a * c;
+         const ab: number = a * b;
+         const bd: number = b * d;
+         const cd: number = c * d;
+
+         const rotationMatrix: number[][] = [
+            [aa + bb - cc - dd, 2 * (bc + ad), 2 * (bd - ac)],
+            [2 * (bc - ad), aa + cc - bb - dd, 2 * (cd + ab)],
+            [2 * (bd + ac), 2 * (cd - ab), aa + dd - bb - cc],
+         ];
+
+         /*const rotationMatrix: number[][] = [
+            [aa + bb - cc - dd, 2 * (bc - ad), 2 * (bd + ac)],
+            [2 * (bc + ad), aa + cc - bb - dd, 2 * (cd - ab)],
+            [2 * (bd - ac), 2 * (cd + ab), aa + dd - bb - cc],
+         ];*/
+
+         return [
+            dotVec3(vector, rotationMatrix[0]),
+            dotVec3(vector, rotationMatrix[1]),
+            dotVec3(vector, rotationMatrix[2]),
+         ];
+      };
+
+      let polar: number = this.rotation.polar;
+      let azimuthal: number = this.rotation.azimuthal;
+
+      //polar -= 90;
+
+      return rotateAround(
+         rotateAround(vertex, [0, 1, 0], polar),
+         [0, 0, 1],
+         azimuthal
+      );
+   }
+
+   private getVertexIndex(pixelIndex: number): number {
+      return this.pixelToVertexIndexMap[pixelIndex];
+   }
+
+   private calculateIndexMaps(): void {
+      this.pixelToVertexIndexMap = new Array(this.width * this.height);
+      this.vertexToPixelIndexMap = [];
+
+      let vertexIndex: number = 0;
       for (let y = 0; y < this.height; y++) {
          for (let x = 0; x < this.width; x++) {
             const index = x + y * this.width;
             if (this.isPixelMaskedOut(index)) {
-               this.mask[index] = false;
-               offset++;
+               this.pixelToVertexIndexMap[index] = null;
+            } else {
+               this.pixelToVertexIndexMap[index] = vertexIndex;
+               this.vertexToPixelIndexMap.push(index);
+               vertexIndex++;
             }
          }
       }
@@ -223,21 +306,13 @@ class PointCloud {
    }
 
    private isPixelMaskedOut(pixelIndex: number): boolean {
-      let normal: { red: number; green: number; blue: number } = {
-         red: this.normalMapPixelArray[pixelIndex + GLSL_CHANNEL.RED],
-         green: this.normalMapPixelArray[pixelIndex + GLSL_CHANNEL.GREEN],
-         blue: this.normalMapPixelArray[pixelIndex + GLSL_CHANNEL.BLUE],
-      };
-
-      if (
-         normal.red + normal.blue + normal.green === 0 ||
-         normal.red === 255 ||
-         normal.green === 255 ||
-         normal.blue === 255
-      ) {
-         return true;
-      }
-      return false;
+      pixelIndex *= 4;
+      return (
+         this.mask[pixelIndex + GLSL_CHANNEL.RED] +
+            this.mask[pixelIndex + GLSL_CHANNEL.GREEN] +
+            this.mask[pixelIndex + GLSL_CHANNEL.BLUE] ===
+         0
+      );
    }
 
    private getPixelSlope(
@@ -245,16 +320,16 @@ class PointCloud {
       stepVector: { x: number; y: number },
       gradientPixelArray: Uint8Array
    ): number {
-      const index = (pixel.x + pixel.y * this.width) * 4;
-
+      const index = pixel.x + pixel.y * this.width;
       if (this.isPixelMaskedOut(index)) {
-         return undefined;
+         return null;
       }
+      const colorIndex: number = index * 4;
 
       const rightSlope: number =
-         gradientPixelArray[index + GLSL_CHANNEL.RED] + SLOPE_SHIFT;
+         gradientPixelArray[colorIndex + GLSL_CHANNEL.RED] + SLOPE_SHIFT;
       const topSlope: number =
-         gradientPixelArray[index + GLSL_CHANNEL.GREEN] + SLOPE_SHIFT;
+         gradientPixelArray[colorIndex + GLSL_CHANNEL.GREEN] + SLOPE_SHIFT;
 
       return stepVector.x * rightSlope + stepVector.y * topSlope;
    }
@@ -303,8 +378,6 @@ class PointCloud {
 
       const gradientPixelArray = rendering.getPixelArray();
 
-      LOADING_AREA.appendChild(await rendering.getJsImage());
-
       pointCloudShader.purge();
 
       return gradientPixelArray;
@@ -341,10 +414,11 @@ class PointCloud {
             const index: number =
                pixelLines[j][k].x + pixelLines[j][k].y * this.width;
 
-            integral[index] = lineOffset;
             if (pixelLines[j][k].slope) {
+               integral[index] = lineOffset;
                lineOffset += pixelLines[j][k].slope * -this.depthFactor;
             } else {
+               integral[index] = null;
                lineOffset = 0;
             }
          }
@@ -356,8 +430,7 @@ class PointCloud {
    private summarizeHorizontalImageLine(
       y: number,
       samplingRateStepX: number,
-      resolution: number,
-      normalMapPixelArray: Uint8Array
+      resolution: number
    ): { averageError: number; highestError: number; zErrors: number[] } {
       const result: {
          averageError: number;
@@ -367,73 +440,41 @@ class PointCloud {
 
       for (let x: number = 0; x < this.width; x += samplingRateStepX) {
          const index: number = x + y * this.width;
-         const vectorIndex: number = index * 3;
-         const colorIndex: number = index * 4;
+         let vectorIndex: number = this.getVertexIndex(index);
 
-         let zAverage: number = 0;
-         let zError: number = 0;
-         let averageDivisor: number = this.integrals.length;
+         if (vectorIndex) {
+            vectorIndex *= 3;
+            let zAverage: number = 0;
+            let zError: number = 0;
+            let averageDivisor: number = this.integrals.length;
 
-         for (let i = 0; i < this.integrals.length; i++) {
-            const currentZ: number = this.integrals[i][index];
-            if (!isNaN(currentZ)) {
-               zAverage += currentZ;
-               if (i !== 0) {
-                  zError += Math.abs(this.integrals[0][index] - currentZ);
+            for (let i = 0; i < this.integrals.length; i++) {
+               const currentZ: number = this.integrals[i][index];
+               if (!isNaN(currentZ)) {
+                  zAverage += currentZ;
+                  if (i !== 0) {
+                     zError += Math.abs(this.integrals[0][index] - currentZ);
+                  }
                }
             }
+            zAverage /= averageDivisor;
+            zError /= averageDivisor;
+            result.averageError += zError / resolution;
+            result.highestError = Math.max(result.highestError, zError);
+            result.zErrors[x] = zError;
+
+            const gpuVertex: number[] = this.getRotatedVertex([
+               x / this.width - 0.5,
+               y / this.width - 0.5,
+               zAverage / this.width,
+            ]);
+
+            this.gpuVertices[vectorIndex + GLSL_CHANNEL.X] = gpuVertex[0];
+            this.gpuVertices[vectorIndex + GLSL_CHANNEL.Y] = gpuVertex[1];
+            this.gpuVertices[vectorIndex + GLSL_CHANNEL.Z] = gpuVertex[2];
+
+            this.objString += "v " + x + " " + y + " " + zAverage + "\n";
          }
-         zAverage /= averageDivisor;
-         zError /= averageDivisor;
-         result.averageError += zError / resolution;
-         result.highestError = Math.max(result.highestError, zError);
-         result.zErrors[x] = zError;
-
-         this.gpuVertices[vectorIndex + GLSL_CHANNEL.X] = x / this.width - 0.5;
-         this.gpuVertices[vectorIndex + GLSL_CHANNEL.Y] = y / this.width - 0.5;
-         this.gpuVertices[vectorIndex + GLSL_CHANNEL.Z] =
-            zAverage / this.width - 0.5;
-
-         const red: number =
-            this.vertexAlbedoColors[colorIndex + GLSL_CHANNEL.RED] / 255;
-         const green: number =
-            this.vertexAlbedoColors[colorIndex + GLSL_CHANNEL.GREEN] / 255;
-         const blue: number =
-            this.vertexAlbedoColors[colorIndex + GLSL_CHANNEL.BLUE] / 255;
-
-         this.gpuVertexAlbedoColors[vectorIndex + GLSL_CHANNEL.RED] = red;
-         this.gpuVertexAlbedoColors[vectorIndex + GLSL_CHANNEL.GREEN] = green;
-         this.gpuVertexAlbedoColors[vectorIndex + GLSL_CHANNEL.BLUE] = blue;
-
-         const normalRed: number =
-            normalMapPixelArray[colorIndex + GLSL_CHANNEL.RED] / 255;
-         const normalGreen: number =
-            normalMapPixelArray[colorIndex + GLSL_CHANNEL.GREEN] / 255;
-         const normalBlue: number =
-            normalMapPixelArray[colorIndex + GLSL_CHANNEL.BLUE] / 255;
-
-         this.gpuVertexNormalColors[vectorIndex + GLSL_CHANNEL.RED] = normalRed;
-         this.gpuVertexNormalColors[
-            vectorIndex + GLSL_CHANNEL.GREEN
-         ] = normalGreen;
-         this.gpuVertexNormalColors[
-            vectorIndex + GLSL_CHANNEL.BLUE
-         ] = normalBlue;
-
-         this.objString +=
-            "v " +
-            x +
-            " " +
-            y +
-            " " +
-            zAverage +
-            " " +
-            red +
-            " " +
-            green +
-            " " +
-            blue +
-            "\n";
       }
 
       return result;
@@ -486,22 +527,8 @@ class PointCloud {
       }
       */
 
-      const dimensionSingleChannel: number = this.width * this.height;
-      const dimensionThreeChannel: number = dimensionSingleChannel * 3;
-
-      const zErrors: number[] = new Array(dimensionSingleChannel);
-      this.gpuVertices = new Array(dimensionThreeChannel);
-      this.gpuVertexAlbedoColors = new Array(dimensionThreeChannel);
-      this.gpuVertexNormalColors = new Array(dimensionThreeChannel);
-
-      //TODO: Make performant.
-      /*const normalMapPixelArray: Uint8Array = this.normalMap
-         .render()
-         .getPixelArray();*/
-
-      const normalMapPixelArray: Uint8Array = new Uint8Array(
-         new Array(this.width * this.height * 4).fill(255)
-      );
+      const zErrors: number[] = new Array(this.vertexToPixelIndexMap.length);
+      this.gpuVertices = new Array(this.vertexToPixelIndexMap.length * 3);
 
       const summerizeThreadPool: ThreadPool = new ThreadPool(
          summarizeDOMStatus
@@ -512,8 +539,7 @@ class PointCloud {
             this,
             y,
             samplingRateStep.x,
-            resolution,
-            normalMapPixelArray
+            resolution
          );
          summerizeThreadPool.add(summerizeMethod);
       }
@@ -534,11 +560,6 @@ class PointCloud {
       for (let j = 0, length = results.length; j < length; j++) {
          const zErrorsLine: number[] = results[j].zErrors;
          for (let i = 0, length = zErrorsLine.length; i < length; i++) {
-            this.gpuVertexErrorColors.push(
-               zErrorsLine[i] / highestError,
-               1 - zErrorsLine[i] / highestError,
-               0
-            );
             zErrors.push(zErrorsLine[i]);
          }
       }
@@ -564,17 +585,5 @@ class PointCloud {
 
    public getGpuVertices(): number[] {
       return this.gpuVertices;
-   }
-
-   public getGpuVertexAlbedoColors(): number[] {
-      return this.gpuVertexAlbedoColors;
-   }
-
-   public getGpuVertexNormalColors(): number[] {
-      return this.gpuVertexNormalColors;
-   }
-
-   public getGpuVertexErrorColors(): number[] {
-      return this.gpuVertexErrorColors;
    }
 }
