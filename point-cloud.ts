@@ -109,6 +109,10 @@ class PointCloud {
          angleDegree: number
       ): number[] => {
          const angle: number = angleDegree * DEGREE_TO_RADIAN_FACTOR;
+
+         if (angle === 0) {
+            return vertex;
+         }
          const axisDivisor: number = Math.sqrt(dotVec3(axis, axis));
          axis = [
             axis[0] / axisDivisor,
@@ -152,16 +156,35 @@ class PointCloud {
          ];
       };
 
-      let polar: number = this.rotation.polar;
-      let azimuthal: number = this.rotation.azimuthal;
+      const polar: number = this.rotation.polar;
+      const azimuthal: number = this.rotation.azimuthal;
 
-      //polar -= 90;
+      const polarRad: number = polar * DEGREE_TO_RADIAN_FACTOR;
+      const azimuthalRad: number = azimuthal * DEGREE_TO_RADIAN_FACTOR;
 
-      return rotateAround(
-         rotateAround(vertex, [0, 1, 0], polar),
+      const polarAxis: number[] = rotateAround(
+         [
+            Math.cos(azimuthalRad) * Math.sin(polarRad),
+            Math.sin(azimuthalRad) * Math.sin(polarRad),
+            0,
+         ],
+         [0, 0, 1],
+         90
+      );
+
+      const azimuthalRotated: number[] = rotateAround(
+         vertex,
          [0, 0, 1],
          azimuthal
       );
+
+      const polarAzimuthalRotated: number[] = rotateAround(
+         azimuthalRotated,
+         polarAxis,
+         polar
+      );
+
+      return rotateAround(polarAzimuthalRotated, [0, 1, 0], -azimuthal);
    }
 
    private getVertexIndex(pixelIndex: number): number {
