@@ -23,14 +23,14 @@ class ScanCamera {
    private left: { x: number; y: number; z: number };
 
    constructor(
-      focalLength = SCAN_CAMERA_FOCAL_LENGTH,
-      sensorWidth = SCAN_CAMERA_SENSOR_WIDTH,
       sphericalPosition: {
          azimuthalDeg: number;
          polarDeg: number;
          radius: number;
       },
-      resolution: { width: number; height: number }
+      resolution: { width: number; height: number },
+      focalLength = SCAN_CAMERA_FOCAL_LENGTH,
+      sensorWidth = SCAN_CAMERA_SENSOR_WIDTH
    ) {
       this.focalLength = focalLength;
       this.sensorSize = {
@@ -48,6 +48,105 @@ class ScanCamera {
       this.left = { x: -this.right.x, y: -this.right.y, z: -this.right.z };
    }
 
+   public getGuiLines(): number[] {
+      const size: number = 0.1;
+
+      const origin: number[] = [
+         this.eulerPosition.x / 2,
+         this.eulerPosition.y / 2,
+         this.eulerPosition.z / 2,
+      ];
+
+      const topLeft: number[] = [
+         this.eulerPosition.x + this.lookAt.x - this.left.x / 2 - this.up.x / 2,
+         this.eulerPosition.y + this.lookAt.y - this.left.y / 2 - this.up.y / 2,
+         this.eulerPosition.z + this.lookAt.z - this.left.z / 2 - this.up.z / 2,
+      ];
+      topLeft[0] *= size;
+      topLeft[1] *= size;
+      topLeft[2] *= size;
+
+      const topRight: number[] = [
+         this.eulerPosition.x +
+            this.lookAt.x -
+            this.right.x / 2 -
+            this.up.x / 2,
+         this.eulerPosition.y +
+            this.lookAt.y -
+            this.right.y / 2 -
+            this.up.y / 2,
+         this.eulerPosition.z +
+            this.lookAt.z -
+            this.right.z / 2 -
+            this.up.z / 2,
+      ];
+      topRight[0] *= size;
+      topRight[1] *= size;
+      topRight[2] *= size;
+
+      const bottomLeft: number[] = [
+         this.eulerPosition.x +
+            this.lookAt.x -
+            this.left.x / 2 -
+            this.down.x / 2,
+         this.eulerPosition.y +
+            this.lookAt.y -
+            this.left.y / 2 -
+            this.down.y / 2,
+         this.eulerPosition.z +
+            this.lookAt.z -
+            this.left.z / 2 -
+            this.down.z / 2,
+      ];
+      bottomLeft[0] *= size;
+      bottomLeft[1] *= size;
+      bottomLeft[2] *= size;
+
+      const bottomRight: number[] = [
+         this.eulerPosition.x +
+            this.lookAt.x -
+            this.right.x / 2 -
+            this.down.x / 2,
+         this.eulerPosition.y +
+            this.lookAt.y -
+            this.right.y / 2 -
+            this.down.y / 2,
+         this.eulerPosition.z +
+            this.lookAt.z -
+            this.right.z / 2 -
+            this.down.z / 2,
+      ];
+      bottomRight[0] *= size;
+      bottomRight[1] *= size;
+      bottomRight[2] *= size;
+
+      return [
+         ...origin,
+         ...topLeft,
+
+         ...origin,
+         ...topRight,
+
+         ...origin,
+         ...bottomLeft,
+
+         ...origin,
+         ...bottomRight,
+
+         ...topLeft,
+         ...topRight,
+
+         ...bottomLeft,
+         ...bottomRight,
+
+         ...topRight,
+         ...bottomRight,
+
+         ...topLeft,
+         ...bottomLeft,
+      ];
+   }
+
    public getDepthPixelInMillimeter(pixel: {
       x: number;
       y: number;
@@ -57,26 +156,38 @@ class ScanCamera {
          this.left,
          this.up
       );
-      const pixelMillimeter: { x: number; y: number; z: number } = {
-         x: this.singlePixelDimension.width * pixel.x,
-         y: this.singlePixelDimension.height * pixel.y,
-         z: this.singlePixelDimension.width * pixel.z,
-      };
 
-      return this.multiplyVectors(
-         this.multiplyVectors(pixelMillimeter, this.right),
-         this.down
+      const leftShift: {
+         x: number;
+         y: number;
+         z: number;
+      } = this.multiplyVectors(
+         {
+            x: this.singlePixelDimension.width * pixel.x,
+            y: this.singlePixelDimension.width * pixel.x,
+            z: this.singlePixelDimension.width * pixel.x,
+         },
+         this.left
       );
-   }
+      const downShift: {
+         x: number;
+         y: number;
+         z: number;
+      } = this.multiplyVectors(
+         {
+            x: this.singlePixelDimension.height * pixel.y,
+            y: this.singlePixelDimension.height * pixel.y,
+            z: this.singlePixelDimension.height * pixel.y,
+         },
+         this.up
+      );
 
-   private getPointCoordinatesInMillimeter(pixelCoordinate: {
-      x: number;
-      y: number;
-   }): { x: number; y: number } {
-      return {
-         x: pixelCoordinate.x * this.singlePixelDimension.width,
-         y: pixelCoordinate.y * this.singlePixelDimension.height,
-      };
+      const relative: { x: number; y: number; z: number } = this.addVectors(
+         leftShift,
+         downShift
+      );
+
+      return this.addVectors(topLeft, relative);
    }
 
    private getSinglePixelSizeInMillimeter(): {
