@@ -46,6 +46,16 @@ class PointCloud {
       this.calculateIndexMaps();
    }
 
+   public getScanCamera(): ScanCamera {
+      return new ScanCamera(
+         {
+            azimuthalDeg: this.rotation.azimuthal,
+            polarDeg: this.rotation.polar,
+         },
+         { width: this.width, height: this.height }
+      );
+   }
+
    public getWidth(): number {
       return this.width;
    }
@@ -92,7 +102,7 @@ class PointCloud {
       });
    }
 
-   private getRotatedVertex(vertex: number[]): number[] {
+   /*private getRotatedVertex(vertex: number[]): number[] {
       const dotVec3: Function = (
          vector1: number[],
          vector2: number[]
@@ -143,12 +153,6 @@ class PointCloud {
             [2 * (bd + ac), 2 * (cd - ab), aa + dd - bb - cc],
          ];
 
-         /*const rotationMatrix: number[][] = [
-            [aa + bb - cc - dd, 2 * (bc - ad), 2 * (bd + ac)],
-            [2 * (bc + ad), aa + cc - bb - dd, 2 * (cd - ab)],
-            [2 * (bd - ac), 2 * (cd + ab), aa + dd - bb - cc],
-         ];*/
-
          return [
             dotVec3(vector, rotationMatrix[0]),
             dotVec3(vector, rotationMatrix[1]),
@@ -185,7 +189,7 @@ class PointCloud {
       );
 
       return rotateAround(polarAzimuthalRotated, [0, 1, 0], -azimuthal);
-   }
+   }*/
 
    private getVertexIndex(pixelIndex: number): number {
       return this.pixelToVertexIndexMap[pixelIndex];
@@ -486,11 +490,16 @@ class PointCloud {
             result.highestError = Math.max(result.highestError, zError);
             result.zErrors[x] = zError;
 
-            const gpuVertex: number[] = this.getRotatedVertex([
+            /*const gpuVertex: number[] = this.getRotatedVertex([
                x / this.width - 0.5,
                y / this.width - 0.5,
                zAverage / this.width,
-            ]);
+            ]);*/
+            const gpuVertex: number[] = [
+               x / this.width - 0.5,
+               y / this.width - 0.5,
+               zAverage / this.width,
+            ];
 
             this.gpuVertices[vectorIndex + GLSL_CHANNEL.X] = gpuVertex[0];
             this.gpuVertices[vectorIndex + GLSL_CHANNEL.Y] = gpuVertex[1];

@@ -7,40 +7,37 @@ const enum VERTEX_COLOR {
 }
 
 class PointCloudRenderer {
-   private vertices: number[];
+   private pointClouds: PointCloud[];
+
+   private vertices: number[] = [];
    private vertexCount: number;
-   private vertexSize: number = 2;
+   private vertexSize: number = 1;
    private vertexBuffer: WebGLBuffer;
 
-   private lineVertices: number[];
-   private lineCount: number;
+   private lineVertices: number[] = [];
+   private lineVertexCount: number;
    private lineVertexBuffer: WebGLBuffer;
 
    private vertexAttribute: number;
-
-   private rotationSpeed: number = 0.001;
-   private rotation: number = 0;
-   private deltaTime: number = 0;
-   private then: number = 0;
 
    private div: HTMLElement;
 
    private gl: WebGL2RenderingContext;
    private canvas: HTMLCanvasElement;
-   private rotationUniform: WebGLUniformLocation;
+   private rotationUniformX: WebGLUniformLocation;
+   private rotationUniformY: WebGLUniformLocation;
    private vertexColorBuffer: WebGLBuffer;
 
    private verticalOrientation: boolean;
 
    constructor(
-      vertices: number[],
+      pointClouds: PointCloud[],
       div: HTMLElement,
       verticalOrientation: boolean = false
    ) {
-      this.vertices = vertices;
+      this.pointClouds = pointClouds;
       this.div = div;
       this.verticalOrientation = verticalOrientation;
-      this.vertexCount = vertices.length / 3;
    }
 
    public updateVertexColor(newColor: VERTEX_COLOR): void {
@@ -57,20 +54,17 @@ class PointCloudRenderer {
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, null);
    }
 
-   private initializeContext(): void {
-      this.canvas = document.createElement("canvas");
-      this.canvas.style.transition = "all 1s";
-      this.div.appendChild(this.canvas);
-      this.gl = this.canvas.getContext("webgl2");
-
-      const testCam: ScanCamera = new ScanCamera(
-         { azimuthalDeg: 0, polarDeg: 0, radius: 2 },
-         { width: 250, height: 250 }
+   private loadPointCloud(pointCloud: PointCloud): void {
+      const scanCamera: ScanCamera = pointCloud.getScanCamera();
+      const vertices: number[] = scanCamera.getGpuDepthPixelsInMillimeter(
+         pointCloud.getGpuVertices()
       );
-      this.lineVertices = testCam.getGuiLines();
-      this.lineCount = this.lineVertices.length / 3;
+      const lineVertices: number[] = scanCamera.getGuiLineGpuVertices();
 
-      let colors = new Array(this.vertices.length).fill(1);
+      this.vertices.push(...vertices);
+      this.lineVertices.push(...lineVertices);
+      this.vertexCount = this.vertices.length / 3;
+      this.lineVertexCount = this.lineVertices.length / 3;
 
       this.vertexBuffer = this.gl.createBuffer();
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
@@ -89,15 +83,17 @@ class PointCloudRenderer {
          this.gl.STATIC_DRAW
       );
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, null);
+   }
 
-      this.vertexColorBuffer = this.gl.createBuffer();
-      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexColorBuffer);
-      this.gl.bufferData(
-         this.gl.ARRAY_BUFFER,
-         new Float32Array(colors),
-         this.gl.STATIC_DRAW
-      );
-      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, null);
+   private initializeContext(): void {
+      this.canvas = document.createElement("canvas");
+      this.canvas.style.transition = "all 1s";
+      this.div.appendChild(this.canvas);
+      this.gl = this.canvas.getContext("webgl2");
+
+      for (let i = 0, length = this.pointClouds.length; i < length; i++) {
+         this.loadPointCloud(this.pointClouds[i]);
+      }
 
       let xRot = -90;
       if (this.verticalOrientation) {
@@ -110,21 +106,17 @@ class PointCloudRenderer {
          "",
          "in vec3 coordinates;",
          "in vec3 v_color;",
-         "uniform float rot;",
+         "uniform float xRot;",
+         "uniform float yRot;",
          "out vec3 f_color;",
          "",
          "void main() {",
-         " f_color = v_color;",
          "",
-         " float sinRotY = sin(rot);",
-         " float cosRotY = cos(rot);",
+         " float sinRotX = sin(xRot);",
+         " float cosRotX = cos(xRot);",
          " ",
-         " float sinRotX = " +
-            GlslFloat.getJsNumberAsString(Math.sin(xRot)) +
-            ";",
-         " float cosRotX = " +
-            GlslFloat.getJsNumberAsString(Math.cos(xRot)) +
-            ";",
+         " float sinRotY = sin(yRot);",
+         " float cosRotY = cos(yRot);",
          " ",
          " mat3 yRot;",
          " yRot[0] = vec3(cosRotY, 0.0, sinRotY);",
@@ -136,7 +128,7 @@ class PointCloudRenderer {
          " xRot[1] = vec3(0.0, cosRotX, -sinRotX);",
          " xRot[2] = vec3(0.0, sinRotX, cosRotX);",
          " vec3 pos = coordinates * xRot * yRot;",
-         " gl_Position = vec4(coordinates * yRot, 1.0);",
+         " gl_Position = vec4(pos, 1.0);",
          " gl_PointSize = " +
             GlslFloat.getJsNumberAsString(this.vertexSize) +
             ";",
@@ -156,7 +148,8 @@ class PointCloudRenderer {
          "out vec4 fragColor;",
          "",
          "void main() {",
-         " fragColor = vec4(f_color, 1.0);",
+         //" fragColor = vec4(f_color, 1.0);",
+         " fragColor = vec4(1.0);",
          "}",
       ].join("\n");
 
@@ -175,22 +168,10 @@ class PointCloudRenderer {
          shaderProgram,
          "coordinates"
       );
-      this.gl.vertexAttribPointer(
-         this.vertexAttribute,
-         3,
-         this.gl.FLOAT,
-         false,
-         0,
-         0
-      );
-      this.gl.enableVertexAttribArray(this.vertexAttribute);
+      //let color = this.gl.getAttribLocation(shaderProgram, "v_color");
 
-      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexColorBuffer);
-      let color = this.gl.getAttribLocation(shaderProgram, "v_color");
-      this.gl.vertexAttribPointer(color, 3, this.gl.FLOAT, false, 0, 0);
-      this.gl.enableVertexAttribArray(color);
-
-      this.rotationUniform = this.gl.getUniformLocation(shaderProgram, "rot");
+      this.rotationUniformX = this.gl.getUniformLocation(shaderProgram, "xRot");
+      this.rotationUniformY = this.gl.getUniformLocation(shaderProgram, "yRot");
 
       this.gl.clearColor(0, 0, 0, 0);
       this.gl.enable(this.gl.DEPTH_TEST);
@@ -200,17 +181,16 @@ class PointCloudRenderer {
    }
 
    private refreshViewportSize(): void {
-      /* QUADRAT
       if (this.canvas.width > this.canvas.height) {
          this.canvas.width = this.div.clientHeight;
          this.canvas.height = this.div.clientHeight;
       } else {
          this.canvas.width = this.div.clientWidth;
          this.canvas.height = this.div.clientWidth;
-      }*/
+      }
 
-      this.canvas.width = this.div.clientWidth;
-      this.canvas.height = this.div.clientHeight;
+      //this.canvas.width = this.div.clientWidth;
+      //this.canvas.height = this.div.clientHeight;
 
       this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
    }
@@ -218,21 +198,25 @@ class PointCloudRenderer {
    public startRendering(): void {
       console.log("Loading rendered point cloud preview.");
       this.initializeContext();
-      setTimeout(this.render.bind(this, 0));
+
+      const cThis: PointCloudRenderer = this;
+      window.addEventListener("mousemove", (event: MouseEvent) => {
+         const rotationX: number =
+            (event.y / window.innerHeight) * Math.PI * 2 + Math.PI;
+         const rotationY: number =
+            (event.x / window.innerWidth) * Math.PI * 2 + Math.PI;
+         setTimeout(cThis.render.bind(cThis, rotationY, rotationX));
+      });
+      setTimeout(this.render.bind(this, 0, 0));
    }
 
-   private render(now: number): void {
-      now *= 1.001;
-      this.deltaTime = now - this.then;
-      this.then = now;
-
+   private render(rotationY: number, rotationX: number): void {
       this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
 
-      this.rotation += this.deltaTime * this.rotationSpeed;
+      this.gl.uniform1f(this.rotationUniformX, rotationX);
+      this.gl.uniform1f(this.rotationUniformY, rotationY);
 
-      this.gl.uniform1f(this.rotationUniform, this.rotation);
-
-      /*this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
       this.gl.vertexAttribPointer(
          this.vertexAttribute,
          3,
@@ -242,7 +226,7 @@ class PointCloudRenderer {
          0
       );
       this.gl.enableVertexAttribArray(this.vertexAttribute);
-      this.gl.drawArrays(this.gl.POINTS, 0, this.vertexCount);*/
+      this.gl.drawArrays(this.gl.POINTS, 0, this.vertexCount);
 
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.lineVertexBuffer);
       this.gl.vertexAttribPointer(
@@ -254,8 +238,6 @@ class PointCloudRenderer {
          0
       );
       this.gl.enableVertexAttribArray(this.vertexAttribute);
-      this.gl.drawArrays(this.gl.LINES, 0, this.lineCount);
-
-      window.requestAnimationFrame(this.render.bind(this, performance.now()));
+      this.gl.drawArrays(this.gl.LINES, 0, this.lineVertexCount);
    }
 }

@@ -2,8 +2,11 @@
 
 // https://webglfundamentals.org/webgl/lessons/webgl-3d-camera.html
 
+// TODO: Separate vector operations.
+
 const SCAN_CAMERA_FOCAL_LENGTH: number = 50; // in millimeter
 const SCAN_CAMERA_SENSOR_WIDTH: number = 36; // in millimeter
+const SCAN_CAMERA_RADIUS: number = 2; // in meter
 
 class ScanCamera {
    private focalLength: number;
@@ -15,8 +18,10 @@ class ScanCamera {
    };
    private eulerPosition: { x: number; y: number; z: number };
    private resolution: { width: number; height: number };
+   private dimensions: { width: number; height: number };
    private singlePixelDimension: { width: number; height: number };
    private lookAt: { x: number; y: number; z: number };
+   private back: { x: number; y: number; z: number };
    private up: { x: number; y: number; z: number };
    private down: { x: number; y: number; z: number };
    private right: { x: number; y: number; z: number };
@@ -26,7 +31,7 @@ class ScanCamera {
       sphericalPosition: {
          azimuthalDeg: number;
          polarDeg: number;
-         radius: number;
+         radius?: number;
       },
       resolution: { width: number; height: number },
       focalLength = SCAN_CAMERA_FOCAL_LENGTH,
@@ -37,30 +42,59 @@ class ScanCamera {
          width: sensorWidth,
          height: (resolution.height * sensorWidth) / resolution.width,
       };
-      this.sphericalPosition = sphericalPosition;
+      if (sphericalPosition.radius) {
+         this.sphericalPosition = {
+            azimuthalDeg: sphericalPosition.azimuthalDeg,
+            polarDeg: sphericalPosition.polarDeg,
+            radius: sphericalPosition.radius,
+         };
+      } else {
+         this.sphericalPosition = {
+            azimuthalDeg: sphericalPosition.azimuthalDeg,
+            polarDeg: sphericalPosition.polarDeg,
+            radius: SCAN_CAMERA_RADIUS,
+         };
+      }
       this.resolution = resolution;
+      this.dimensions = this.getImageDimensionsInMillimeter();
       this.eulerPosition = this.getEulerPosition();
       this.singlePixelDimension = this.getSinglePixelSizeInMillimeter();
       this.lookAt = this.getLookAtVector();
+      this.back = { x: -this.lookAt.x, y: -this.lookAt.y, z: -this.lookAt.z };
       this.up = this.getUpVector();
       this.down = { x: -this.up.x, y: -this.up.y, z: -this.up.z };
       this.right = this.getRightVector();
       this.left = { x: -this.right.x, y: -this.right.y, z: -this.right.z };
    }
 
-   public getGuiLines(): number[] {
+   public getGuiLineGpuVertices(): number[] {
       const size: number = 0.1;
 
       const origin: number[] = [
-         this.eulerPosition.x / 2,
-         this.eulerPosition.y / 2,
-         this.eulerPosition.z / 2,
+         this.eulerPosition.x / this.sphericalPosition.radius,
+         this.eulerPosition.y / this.sphericalPosition.radius,
+         this.eulerPosition.z / this.sphericalPosition.radius,
       ];
 
+      const scaledLookAt = {
+         x: (-this.lookAt.x * size * 100) / 2,
+         y: (-this.lookAt.y * size * 100) / 2,
+         z: (-this.lookAt.z * size * 100) / 2,
+      };
+
       const topLeft: number[] = [
-         this.eulerPosition.x + this.lookAt.x - this.left.x / 2 - this.up.x / 2,
-         this.eulerPosition.y + this.lookAt.y - this.left.y / 2 - this.up.y / 2,
-         this.eulerPosition.z + this.lookAt.z - this.left.z / 2 - this.up.z / 2,
+         this.eulerPosition.x +
+            scaledLookAt.x -
+            this.left.x / 2 -
+            this.up.x / 2,
+         this.eulerPosition.y +
+            scaledLookAt.y -
+            this.left.y / 2 -
+            this.up.y / 2,
+         this.eulerPosition.z +
+            scaledLookAt.z -
+            this.left.z / 2 -
+            this.up.z / 2,
       ];
       topLeft[0] *= size;
       topLeft[1] *= size;
@@ -68,15 +102,15 @@ class ScanCamera {
 
       const topRight: number[] = [
          this.eulerPosition.x +
-            this.lookAt.x -
+            scaledLookAt.x -
             this.right.x / 2 -
             this.up.x / 2,
          this.eulerPosition.y +
-            this.lookAt.y -
+            scaledLookAt.y -
             this.right.y / 2 -
             this.up.y / 2,
          this.eulerPosition.z +
-            this.lookAt.z -
+            scaledLookAt.z -
             this.right.z / 2 -
             this.up.z / 2,
       ];
@@ -86,15 +120,15 @@ class ScanCamera {
 
       const bottomLeft: number[] = [
          this.eulerPosition.x +
-            this.lookAt.x -
+            scaledLookAt.x -
             this.left.x / 2 -
             this.down.x / 2,
          this.eulerPosition.y +
-            this.lookAt.y -
+            scaledLookAt.y -
             this.left.y / 2 -
             this.down.y / 2,
          this.eulerPosition.z +
-            this.lookAt.z -
+            scaledLookAt.z -
             this.left.z / 2 -
             this.down.z / 2,
       ];
@@ -104,15 +138,15 @@ class ScanCamera {
 
       const bottomRight: number[] = [
          this.eulerPosition.x +
-            this.lookAt.x -
+            scaledLookAt.x -
             this.right.x / 2 -
             this.down.x / 2,
          this.eulerPosition.y +
-            this.lookAt.y -
+            scaledLookAt.y -
             this.right.y / 2 -
             this.down.y / 2,
          this.eulerPosition.z +
-            this.lookAt.z -
+            scaledLookAt.z -
             this.right.z / 2 -
             this.down.z / 2,
       ];
@@ -147,7 +181,38 @@ class ScanCamera {
       ];
    }
 
-   public getDepthPixelInMillimeter(pixel: {
+   public getGpuDepthPixelsInMillimeter(pixels: number[]): number[] {
+      const millimeterPixels: number[] = [];
+
+      for (let i = 0, length = pixels.length; i < length; i += 3) {
+         const millimeterPixel: {
+            x: number;
+            y: number;
+            z: number;
+         } = this.getDepthPixelInMillimeter({
+            x: pixels[i],
+            y: pixels[i + 1],
+            z: pixels[i + 2],
+         });
+         if (
+            !isNaN(millimeterPixel.x) &&
+            !isNaN(millimeterPixel.y) &&
+            !isNaN(millimeterPixel.z)
+         ) {
+            millimeterPixels.push(
+               millimeterPixel.x,
+               millimeterPixel.y,
+               millimeterPixel.z
+            );
+         }
+      }
+
+      console.log(Math.max(...millimeterPixels));
+      console.log(Math.min(...millimeterPixels));
+      return millimeterPixels;
+   }
+
+   private getDepthPixelInMillimeter(pixel: {
       x: number;
       y: number;
       z: number;
@@ -182,12 +247,35 @@ class ScanCamera {
          this.up
       );
 
-      const relative: { x: number; y: number; z: number } = this.addVectors(
-         leftShift,
-         downShift
+      // TODO: Correct depth factor.
+      const depthShift: {
+         x: number;
+         y: number;
+         z: number;
+      } = this.multiplyVectors(
+         {
+            x: this.singlePixelDimension.height * pixel.z + 0.00015,
+            y: this.singlePixelDimension.height * pixel.z + 0.00015,
+            z: this.singlePixelDimension.height * pixel.z + 0.00015,
+         },
+         this.back
       );
 
-      return this.addVectors(topLeft, relative);
+      // TODO: Dynamic scaling.
+      const relative: {
+         x: number;
+         y: number;
+         z: number;
+      } = this.multiplyVectors(
+         this.addVectors(this.addVectors(leftShift, downShift), depthShift),
+         {
+            x: 200,
+            y: 200,
+            z: 200,
+         }
+      );
+
+      return relative;
    }
 
    private getSinglePixelSizeInMillimeter(): {
@@ -231,11 +319,21 @@ class ScanCamera {
    }
 
    private getUpVector(): { x: number; y: number; z: number } {
-      return this.getCrossProduct(this.lookAt, { x: 0, y: 0, z: 1 });
+      const zAxis = { x: 0, y: 0, z: 1 };
+      const yAxis = { x: 0, y: 1, z: 0 };
+
+      if (
+         this.getUnitVector(this.eulerPosition).x === zAxis.x &&
+         this.getUnitVector(this.eulerPosition).y === zAxis.y &&
+         this.getUnitVector(this.eulerPosition).z === zAxis.z
+      ) {
+         return yAxis;
+      }
+      return this.getUnitVector(this.getCrossProduct(this.lookAt, zAxis));
    }
 
    private getRightVector(): { x: number; y: number; z: number } {
-      return this.getCrossProduct(this.lookAt, this.up);
+      return this.getUnitVector(this.getCrossProduct(this.lookAt, this.up));
    }
 
    private getEulerPosition(): { x: number; y: number; z: number } {
